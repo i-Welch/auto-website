@@ -18,9 +18,38 @@ Autonomous system that discovers SMBs with weak online presence, builds personal
 7. **Manage** site + presence via AI SMS assistant (Claude + Twilio), weekly LLM-generated reports.
 
 ## Product surfaces
+- **Marketing landing page** (`yourbrand.com`) — inbound top of funnel. See "Landing page" section.
 - **Lead-facing:** demo sites (S3/CloudFront), outreach messages, landing page on demo expiration.
 - **Customer-facing:** live Next.js site (Vercel), Twilio SMS assistant, weekly email reports, magic-link email auth.
 - **Operator-facing:** internal dashboard for human-in-loop review of outreach, directory submission tasks, billing escalations, service-module config.
+
+## Landing page
+The public marketing site at the apex domain. Also functions as a second top-of-funnel by generating inbound leads via a free SEO/quality analysis tool.
+
+**Sections:**
+- Hero — value prop, example demo site link, primary CTA ("Get a free analysis of your site").
+- How it works — 3-step flow (we find your business, we build a demo, you pay to go live).
+- Free Site Analysis — the lead magnet. User enters their existing site URL + email (both required). We run an automated audit and email the report within minutes. Email capture feeds the CRM as an inbound lead with source `landing_analysis` — outreach loop re-engages via the standard pipeline.
+- Sample demo gallery — a few anonymized example demo sites we built.
+- Pricing — single $50/mo plan, what's included.
+- Contact us — simple form (name, email, message). Submissions create an `operator_task` and notify the operator inbox.
+- Footer — legal (privacy, terms, CAN-SPAM address), unsubscribe link.
+
+**Free Site Analysis details:**
+- Inputs: site URL, email (required, validated), optional business name.
+- Validation: MX check on the email domain; reject duplicate submissions within 24h per URL+email pair; hCaptcha on submit; per-IP throttling.
+- Audit dimensions (automated, reuse the presence-scoring pipeline):
+  - Lighthouse-style perf / accessibility / SEO / best-practices scores via a headless Chrome runner.
+  - Mobile friendliness, SSL, page weight, load time.
+  - Meta tags, title, description, canonical, robots.
+  - Schema.org / local-business structured data presence.
+  - NAP consistency vs Google Maps / Yelp records (if matched).
+  - GBP completeness (photos, hours, categories, review count).
+  - Directory presence (Yelp, BBB, Facebook, Apple Maps).
+- Output: HTML email with a per-dimension score, top-3 called-out issues, and a CTA to "see what a new site would look like — we'll build a free demo." Clicking the CTA triggers a demo-build job against the submitted business.
+- Every submission stored as an `analysis_request` row, linked to a `business` record (matched by domain or created fresh). The business is then an inbound lead in the same CRM as cold-discovery businesses — all downstream outreach, scoring, and assistant flows apply.
+
+**Contact form:** same treatment — creates an `operator_task` + emails the operator inbox, no auto-reply beyond a confirmation page.
 
 ## Data sources (modular)
 All data sources implement a shared interface so new sources are plug-in. Each source emits candidate business records tagged with source + confidence.

@@ -66,6 +66,16 @@ The retention story.
 - Identity: phone-number match at signup, reject others.
 - **Done when:** you text the assistant as a test customer, change hours + swap a photo, and the live site updates after confirmation.
 
+### Phase 5.5 — Landing page + free analysis (week 7, parallel with assistant)
+Inbound funnel. Can be built in parallel with the assistant since they share no code.
+- `apps/landing` on Vercel at `yourbrand.com`: hero, how-it-works, sample gallery, pricing, contact, analyze CTA.
+- `/analyze` form (URL + email, hCaptcha, MX check) → `POST /api/analyze` → `analysis_request` row + SQS job.
+- `worker-analysis`: headless Chrome Lighthouse runner + reuse presence-scoring checks (NAP, GBP, directories). Writes report JSON.
+- SES email with the report + CTA to an auto-built demo (triggers `worker-sitegen` against the submitted business).
+- `/contact` form → `contact_submission` + `operator_task` + operator email.
+- Legal pages: privacy, terms, unsubscribe handler.
+- **Done when:** submit a URL as a test user, receive a real report email within 5 minutes with a working demo link. Contact form delivers to operator inbox.
+
 ### Phase 6 — Weekly report + GBP request (week 8)
 - LLM-generated weekly email using: site analytics (Vercel), review deltas (GBP API read-only once linked), outreach activity.
 - AI-drafted GBP manager-access request sent on day-1 of each customer relationship. Human reviews, then sends.

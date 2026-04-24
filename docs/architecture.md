@@ -11,6 +11,8 @@ auto-website/
     worker-sitegen/     # demo/live site generation + deploy
     assistant/          # Twilio webhook handler + Claude tool-use loop
     dashboard/          # internal operator UI (Next.js)
+    landing/            # public marketing site at yourbrand.com (Next.js on Vercel)
+    worker-analysis/    # runs site-analysis audits from landing-page submissions
     demo-template-contractor/  # Next.js template, the "fork source" for site gen
   packages/
     db/                 # data access layer, schemas, migrations
@@ -69,6 +71,9 @@ change_log         (id, business_id, surface[site|gbp|directory|...], actor[ai|h
 assistant_thread   (customer_id, twilio_phone, messages jsonb)
 service_instance   (customer_id, service_module_id, config jsonb, state jsonb)
 operator_task      (kind, business_id?, customer_id?, payload, status, assignee, created_at)
+
+analysis_request   (id, business_id?, submitted_url, submitted_email, business_name?, status, report jsonb, created_at, emailed_at)
+contact_submission (id, name, email, message, source_page, created_at, operator_task_id)
 ```
 
 Stage is a view/computed field off `business` + related rows, not a stored column.
@@ -164,6 +169,39 @@ On conversion:
 8. Unhandleable → `create_operator_task` + email to operator inbox.
 
 Because the assistant's capabilities come entirely from the service-module registry, shipping a new module (e.g., `square-reviews-integration`) immediately gives the assistant the ability to manage that surface for eligible customers — no changes to the assistant service itself.
+
+## Landing page (`apps/landing`)
+
+Public marketing site, deployed to Vercel at the apex domain (`yourbrand.com`). The apex sits on Vercel; `*.yourbrand.com` wildcard still points at CloudFront for demos + live customer sites, routed via DNS / edge rules.
+
+**Stack:**
+- Next.js (App Router), server components, Tailwind. Same component library as the demo template so visual brand is consistent.
+- Hosted on Vercel (separate project from customer sites).
+- Uses Vercel Analytics for marketing funnel metrics.
+
+**Routes / surfaces:**
+- `/` — hero, how-it-works, sample gallery, pricing, analysis CTA.
+- `/analyze` — form page (URL + email). POSTs to `/api/analyze` (Next.js route handler).
+- `/analyze/submitted` — confirmation page ("check your inbox in a few minutes").
+- `/contact` — contact form. POSTs to `/api/contact`.
+- `/privacy`, `/terms`, `/unsubscribe` — legal + unsubscribe handler (writes to `contact` do-not-contact list).
+
+**Analysis submission flow:**
+1. Landing form → `POST /api/analyze` (rate-limited, hCaptcha verified, MX-checked).
+2. Handler creates `analysis_request` row, matches/creates a `business` by domain lookup, enqueues SQS job for `worker-analysis`.
+3. `worker-analysis` runs the audit: headless Chrome / Lighthouse run + reuse of scoring pipeline for NAP/directory/GBP checks. Writes `report` JSON onto the row.
+4. Worker sends the report email via SES (using the same infra as cold outreach) with a CTA to the generated demo.
+5. Business now enters the CRM as an inbound lead (`source: landing_analysis`) and is eligible for the standard outreach pipeline, with priority boost since they opted in.
+
+**Contact submission flow:**
+1. `POST /api/contact` validates + rate-limits.
+2. Creates `contact_submission` + linked `operator_task`, emails operator inbox.
+3. Response page confirms receipt.
+
+**Bot / abuse protection:**
+- hCaptcha on all forms.
+- Per-IP + per-email throttling in the API route.
+- Disposable-email-domain blocklist.
 
 ## Security / access
 - Stripe webhook signature verified.
