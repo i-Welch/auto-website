@@ -7,15 +7,14 @@ Constraint: single operator (you) + AI coding assistance. Keep infra small, defe
 ## Phases
 
 ### Phase 0 — Foundations (week 1)
-Stand up scaffolding so all later work has a place to land.
+Stand up scaffolding so all later work has a place to land. **All-Netlify, no AWS.** Walk-through in `phase-0-plan.md`.
 - Monorepo (pnpm + Turborepo), TypeScript, shared ESLint/Prettier.
-- Netlify team + sites for `apps/landing`, `apps/dashboard`, `apps/api`, `apps/live-sites`. Connect GitHub for auto-deploy on push.
-- Provision **Netlify DB (Neon Postgres)**. `packages/db` with initial migrations (`business`, `business_source`, `contact`, audit). Migration runner wired into CI.
-- AWS account (workers only): VPC, ECR, small ECS cluster, SQS queues, S3 demo bucket, SES verified domain.
-- Wildcard cert + DNS for `*.yourbrand.com` → CloudFront → S3 demos.
-- Sentry project. Env vars set in Netlify (web) and SSM (workers).
-- GitHub Actions: Netlify deploys via Netlify CLI / Git integration; worker deploys via ECR → ECS.
-- **Done when:** landing site is live at `yourbrand.com`, a hello-world Netlify Function responds, a Fargate worker can read/write Neon, Sentry captures an error from each.
+- Five Netlify sites in one repo: `apps/landing`, `apps/dashboard`, `apps/live-sites`, `apps/assistant`, `apps/workers`. Each connected to GitHub for auto-deploy.
+- Provision **Netlify DB (Neon Postgres)**. `packages/db` (Drizzle) with initial migrations (`business`, `business_source`, `contact`, `business_audit`).
+- **Inngest** wired to `apps/workers` for durable workflows / cron / fan-out / retries.
+- **Resend** account + Sentry project. Env vars in Netlify per site.
+- (Optional, only if domain ready) Custom domains: apex → landing, `app.` → dashboard, `*.` wildcard → live-sites.
+- **Done when:** all 5 sites build green, `db.healthcheck` Inngest function runs end-to-end against Neon, Sentry captures errors from web + workers, CI green on `master`.
 
 ### Phase 1 — Discovery for Austin contractors (week 2)
 Narrow, focused discovery — just enough to produce a candidate list.
