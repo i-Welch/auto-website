@@ -127,18 +127,75 @@ The "how much is this lead worth if we land them" score.
 
 ---
 
-### 1.6 — Yelp Fusion enrichment (~1 day, optional but recommended) 🤖 + 👤
+### 1.6 — Multi-source enrichment (~2-3 days) 🤖 + 👤
 
-Validates the dedup pipeline against a second source and fills gaps GMaps misses.
+GMaps gives us *who exists*. Marketplace presence (Angi, HomeAdvisor, Thumbtack, Houzz) tells us *who is already paying for leads but hasn't built their own funnel* — the strongest possible buying signal for our offer. State licensing data validates *who is a legit licensed business*.
 
-- 👤 Provide `YELP_API_KEY` (Yelp Fusion).
-- 🤖 `packages/data-sources/src/yelp/` adapter:
-  - `businesses/search` for the same metro + categories.
-  - Run in `enrich` mode: don't add new businesses, just attach as a new `business_source` row to existing matches via dedup.
-  - For genuinely new businesses Yelp finds that GMaps missed, add them to `business`.
-- 🤖 Re-run scoring after Yelp data lands — extra signals (Yelp review count delta, presence on Yelp) feed value + presence scores.
+All sources here run in **enrich mode**: they attach `business_source` rows to existing businesses (matched via the dedup keys from 1.3), feed signals into scoring, and only add a new `business` row when they find something GMaps genuinely missed.
 
-✅ ~30-50% of the GMaps businesses now have a Yelp source row attached. A handful of "GMaps-unfindable" businesses are added fresh from Yelp.
+#### 1.6a — Yelp Fusion (~half day) 🤖 + 👤
+The clean one. Real API, generous limits.
+- 👤 Provide `YELP_API_KEY` (Yelp Fusion developer portal).
+- 🤖 `packages/data-sources/src/yelp/` adapter using `businesses/search` + `businesses/{id}`.
+- Signals added: Yelp review count, Yelp rating, Yelp claimed status, "no Yelp profile" flag.
+
+#### 1.6b — Texas state licensing (~half day) 🤖
+High-quality government data. Bulk download, no API key, no scraping risk.
+- TDLR (Texas Department of Licensing and Regulation) — covers HVAC, electrical, and several other trades. Bulk CSV of active license holders is publicly downloadable.
+- TSBPE (Texas State Board of Plumbing Examiners) — separate board for plumbers, also has public license lookup.
+- 🤖 `packages/data-sources/src/tx-licensing/`:
+  - Periodic bulk-download script (monthly is enough — licenses don't churn fast).
+  - Match by name + phone + zip; ambiguity goes to the dedup-candidate queue.
+- Signals added: license type(s), license number(s), license active/expired status, years licensed.
+- Why this matters: a contractor with no website but an active TDLR HVAC license is a high-confidence real business — strong positive signal vs. someone we can't verify exists.
+
+#### 1.6c — Marketplace presence checks (~1.5 days) 🤖 + 👤
+Honest framing: **none of these have public APIs, all have anti-bot protections.** We do *presence checks only* (does this business have a profile here? what's the review count?), not full crawls. One HTTP request per business per marketplace, polite delays, realistic User-Agent. Treat results as best-effort — when we get blocked or hit a captcha, we skip and log, we don't retry forever.
+
+Adapters:
+- `packages/data-sources/src/marketplaces/angi/`
+- `packages/data-sources/src/marketplaces/homeadvisor/` (same parent as Angi, often shares profile data)
+- `packages/data-sources/src/marketplaces/thumbtack/`
+- `packages/data-sources/src/marketplaces/houzz/` (remodelers, cabinet folks, designers)
+
+Each implements:
+```ts
+interface MarketplaceAdapter {
+  id: string;
+  presenceCheck(business: Business): Promise<MarketplacePresence | null>;
+}
+type MarketplacePresence = {
+  found: boolean;
+  profileUrl?: string;
+  reviewCount?: number;
+  rating?: number;
+  yearsOnPlatform?: number;
+  badges?: string[];   // "Top Pro", "Elite Service", etc. — signal of investment
+};
+```
+
+Operational rules:
+- Per-adapter rate limit: max 1 request/second.
+- Per-adapter circuit breaker: if 3 consecutive requests return blocking responses (403/captcha/Cloudflare challenge), halt that adapter for the run.
+- Cache results for 30 days — same business, same marketplace, no re-fetch.
+- Headless browser (Playwright) only if plain HTTP doesn't work; chromium spin-up costs more, use sparingly.
+- ToS: we crawl public pages at human-rate volumes for our own evaluation. Document this; don't overdo it.
+
+#### Scoring signals added by 1.6
+These get added to `packages/core/src/scoring/presence.ts` and `value.ts`:
+- **Listed on Angi/HomeAdvisor/Thumbtack but no own website** → +25 pts presence (high-intent: already paying for leads).
+- **Listed on 3+ marketplaces** → +10 pts value (busy enough to spread across platforms = real money on the line).
+- **High review count on a marketplace + low review count on Google** → +5 pts presence (their funnel is the marketplace, not their own brand).
+- **Active state license** → +10 pts value (verified real business).
+- **No marketplace presence + no website + claimed on GMaps** → -10 pts presence (probably small/local-only/not buying leads, less likely to convert).
+
+#### 1.6 deliverables
+- 🤖 All adapters above implemented.
+- 🤖 `scripts/enrich.ts --metro=austin --niche=contractor [--source=yelp|angi|...|all]` runs enrichment over the existing `business` table.
+- 🤖 Scoring re-run picks up the new signals.
+- 🤖 `scripts/enrichment-stats.ts` prints per-source coverage (% of businesses for which we got data, % blocked, average response time).
+
+✅ At least 60% of Austin contractors have ≥1 enrichment source row beyond GMaps. Top-25 ranking visibly shifts after enrichment in a way that improves eyeball quality (1.7 should re-validate post-enrichment).
 
 ---
 
@@ -158,12 +215,14 @@ Sanity check before automation.
 ### 1.8 — Phase 1 done-criteria check 🤖
 
 - [ ] `pnpm tsx scripts/discover.ts --metro=austin --niche=contractor` runs end-to-end with no errors.
+- [ ] `pnpm tsx scripts/enrich.ts --metro=austin --niche=contractor --source=all` runs end-to-end with no errors.
 - [ ] At least 500 unique Austin contractors in the `business` table.
 - [ ] Every business has a `score`, `priority`, and at least one `business_source` row.
-- [ ] Re-running discovery does not create duplicates.
+- [ ] At least 60% of businesses have ≥1 enrichment source row (Yelp / TX license / marketplace) on top of GMaps.
+- [ ] Re-running discovery + enrichment does not create duplicates.
 - [ ] Dedup stats: <5% of records flagged as ambiguous candidates needing manual review.
-- [ ] Top-25 by priority passes eyeball validation.
-- [ ] Cost report: total Google Maps spend for the run is documented (`discovery_run.cost_estimate_cents`) and is in the expected band (<$10 for ~500 records).
+- [ ] Top-25 by priority passes eyeball validation, post-enrichment.
+- [ ] Cost report: total Google Maps spend documented (<$10 for ~500 records). Marketplace adapters' block-rate documented; coverage acceptable per our judgment.
 
 ✅ Phase 1 done. Move to Phase 2 (Demo site generator) — we have a queue of leads ready to receive demos.
 
@@ -172,7 +231,8 @@ Sanity check before automation.
 ### 1.9 — Deferred from Phase 1 (next when needed)
 
 - Scheduled re-scans (becomes a Netlify Scheduled Function). Wait until we know how often we want fresh data.
-- Facebook Pages, BBB, Yellow Pages, Texas SOS adapters. Add as we need them.
+- Additional enrichment sources we can add later if signal quality demands: Facebook Pages, BBB, Yellow Pages, Nextdoor (limited partner API only), Porch, Bark, Texas SOS general business registrations.
+- Headless-browser fallback for marketplaces that hard-block plain HTTP — only build this if presence-check coverage from 1.6c is too low to be useful.
 - The operator API for inspecting/editing scoring weights — direct DB / `weights.ts` edit is fine for now.
 - Owner-contact discovery (email/phone for the actual person). Belongs to Phase 3 (Outreach), not discovery.
 - Conversion-data feedback loop into scoring weights. Needs conversion data to exist first — Phase 7+.
@@ -185,12 +245,15 @@ Sanity check before automation.
 |---|---|---|
 | `NETLIFY_DATABASE_URL` | Sub-phase 1.0 | Provision Netlify DB per Phase 0 Step 7, paste the env var value back here |
 | `GOOGLE_PLACES_API_KEY` | Sub-phase 1.1 | Google Cloud Console → enable **Places API (New)** → create restricted key |
-| `YELP_API_KEY` | Sub-phase 1.6 (optional, can defer) | Yelp Fusion developer portal |
+| `YELP_API_KEY` | Sub-phase 1.6a | Yelp Fusion developer portal |
+| (no key needed) | Sub-phase 1.6b | TDLR + TSBPE bulk downloads are public |
+| (no key needed) | Sub-phase 1.6c | Marketplace adapters are public-page presence checks |
 
 Plus a one-time decision before we start coding:
 
-1. **Skip 1.6 (Yelp) for now or include?** Including it doubles the dedup confidence but adds a day. Recommend **include**.
-2. **Cost ceiling for the first Austin run?** Recommend **$10 hard cap** in the script (it tracks spend live and aborts). Adjust if you want.
-3. **Ranking persistence:** keep score history (every score becomes an immutable row) or just current score? Recommend **just current** for MVP, with `business_audit` capturing the changes if we ever care.
+1. **1.6 scope.** Do you want all three sub-pieces (Yelp + TX licensing + marketplaces), or trim? Recommend **all three** — Yelp is cheap, TX licensing is free + high-value, marketplaces are the real differentiator for our buying-signal model.
+2. **Marketplace ToS posture.** I'm proposing public-page presence checks at human-rate volumes. Acceptable risk to you, or do you want to skip 1.6c and rely on 1.6a + 1.6b only?
+3. **Cost ceiling for the first Austin run?** Recommend **$10 hard cap** on Google Maps spend (tracked live, aborts on hit).
+4. **Ranking persistence:** keep score history or just current score? Recommend **just current** for MVP, with `business_audit` capturing changes if we ever care.
 
 Answer those + provide the keys, and I start at sub-phase 1.0.
