@@ -18,7 +18,7 @@ Autonomous system that discovers SMBs with weak online presence, builds personal
 7. **Manage** site + presence via AI SMS assistant (Claude + Twilio), weekly LLM-generated reports.
 
 ## Product surfaces
-- **Marketing landing page** (`yourbrand.com`) — inbound top of funnel. See "Landing page" section.
+- **Marketing landing page** (`growonline.app`) — inbound top of funnel. See "Landing page" section.
 - **Lead-facing:** demo sites (S3/CloudFront), outreach messages, landing page on demo expiration.
 - **Customer-facing:** live Next.js site (Vercel), Twilio SMS assistant, weekly email reports, magic-link email auth.
 - **Operator-facing:** internal dashboard for human-in-loop review of outreach, directory submission tasks, billing escalations, service-module config.
@@ -110,7 +110,7 @@ All $50/mo at MVP. Tier architecture ready but not exposed.
 - **AI-generated templates** per niche, versioned in the repo. Contractor template first.
 - **AI code-gen pipeline:** reads business record, forks template, customizes TSX, builds, deploys. Every deploy logged.
 - **Content:** AI-authored copy (hyper-personalized). Photos: Google Maps (where permissible), stock, or AI-generated, with AI augmentation.
-- **Subdomain:** `{slug}.yourbrand.com` for both demo and live.
+- **Subdomain:** `{slug}.growonline.app` for both demo and live.
 - **Domain research:** registrar API (Cloudflare/Namecheap); AI suggests 3-5 names. Domains ≤$100/yr bundled into $50/mo; pricier ones pitched as add-on.
 - **Demo expiration:** 30 days. After expiry, subdomain serves a re-engagement landing page with contact-capture form that re-triggers outreach.
 

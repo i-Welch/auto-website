@@ -3,7 +3,7 @@
 ## Repo layout (monorepo, pnpm workspaces + Turborepo)
 
 ```
-auto-website/
+growonline/   # repo dir on disk is `auto-website` for historical reasons
   apps/
     landing/                  # Next.js on Netlify — public marketing site + public API routes
     dashboard/                # Next.js on Netlify — operator UI + protected API routes
@@ -32,7 +32,7 @@ Everything ships on Netlify primitives. No AWS account required for MVP. Long-ru
 |---|---|
 | Landing site (`apps/landing`) | Netlify site (Next.js) |
 | Operator dashboard (`apps/dashboard`) | Netlify site (Next.js, behind auth) |
-| Multi-tenant customer sites (demo + live) (`apps/live-sites`) | Netlify site (Next.js), wildcard custom domain `*.<domain>` |
+| Multi-tenant customer sites (demo + live) (`apps/live-sites`) | Netlify site (Next.js), wildcard custom domain `*.growonline.app` |
 | Assistant (Twilio webhook) (`apps/assistant`) | Netlify site (Functions only) |
 | Workers (`apps/workers`) | Netlify site (Inngest functions running on Netlify Functions) |
 | Public API + webhooks (Stripe, Twilio, form posts) | Colocated as Next.js route handlers in `landing` and `dashboard`, or Netlify Functions in dedicated sites |
@@ -57,7 +57,7 @@ Everything ships on Netlify primitives. No AWS account required for MVP. Long-ru
 - *Demo builds* (`next build`) — fit comfortably in a single Background Function (~30-90s for a small site).
 - *Warm sandboxes for live AI rebuilds during a demo chat* — would need persistent compute. Deferred from MVP. When added post-MVP, options: (a) accept ~30-60s cold rebuilds with status streaming, (b) add one Fly Machine specifically for sitegen.
 
-**Subdomain routing:** `apps/live-sites` owns the wildcard custom domain (`*.<domain>`). Next.js middleware reads the `host` header, looks up the slug in DB, and renders the right tenant — same code path serves demo and live sites, distinguished by `status` on the row.
+**Subdomain routing:** `apps/live-sites` owns the wildcard custom domain (`*.growonline.app`). Next.js middleware reads the `host` header, looks up the slug in DB, and renders the right tenant — same code path serves demo and live sites, distinguished by `status` on the row.
 
 ## Data model (high level)
 
@@ -183,7 +183,7 @@ Because the assistant's capabilities come entirely from the service-module regis
 
 ## Landing page (`apps/landing`)
 
-Public marketing site, deployed to Netlify at the apex domain. Apex (`<domain>`) → landing site. Wildcard `*.<domain>` → `apps/live-sites`. Both are Netlify sites with their own custom-domain config.
+Public marketing site, deployed to Netlify at the apex domain. Apex (`growonline.app`) → landing site. Wildcard `*.growonline.app` → `apps/live-sites`. Both are Netlify sites with their own custom-domain config.
 
 **Stack:**
 - Next.js (App Router), server components, Tailwind. Same component library as the demo template so visual brand is consistent.

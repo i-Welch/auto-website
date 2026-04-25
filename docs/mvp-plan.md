@@ -31,11 +31,12 @@ The wow factor. This is where most eng time lives.
 - `packages/sitegen`:
   - Template fork into tmp workspace.
   - Claude code-edit loop to customize copy + image selection.
-  - `next build && next export`, upload to S3.
-  - CloudFront + Lambda@Edge for `{slug}.yourbrand.com` routing.
-- Wildcard DNS + ACM cert for `*.yourbrand.com`.
+  - `next build` static export, upload artifacts to **Netlify Blobs** under `demos/{slug}/v{N}/`.
+  - Update `demo_site.current_version` pointer.
+- Inngest function `sitegen.build` orchestrates the steps above, triggered for the top-N scored businesses.
+- `apps/live-sites` middleware reads the host header → looks up `slug.current_version` → serves the matching blob prefix. Same app handles demo and live tenants.
+- Wildcard custom domain `*.growonline.app` on the `growonline-live-sites` Netlify site (Pro tier required).
 - Photo pipeline: Google Maps photos → stock fallback → AI-gen last resort.
-- `worker-sitegen` consumes a queue, builds demos for the top-N scored businesses.
 - **Done when:** 25 demo sites live at real subdomains, each convincingly personalized. You show 3 to non-tech friends, they believe they're real.
 
 ### Phase 3 — Outreach (week 5)
@@ -69,7 +70,7 @@ The retention story.
 
 ### Phase 5.5 — Landing page + free analysis (week 7, parallel with assistant)
 Inbound funnel. Can be built in parallel with the assistant since they share no code.
-- `apps/landing` on Netlify at `yourbrand.com`: hero, how-it-works, sample gallery, pricing, contact, analyze CTA.
+- `apps/landing` on Netlify at `growonline.app`: hero, how-it-works, sample gallery, pricing, contact, analyze CTA.
 - `/analyze` form (URL + email, hCaptcha, MX check) → `POST /api/analyze` → `analysis_request` row + SQS job.
 - `worker-analysis`: headless Chrome Lighthouse runner + reuse presence-scoring checks (NAP, GBP, directories). Writes report JSON.
 - SES email with the report + CTA to an auto-built demo (triggers `worker-sitegen` against the submitted business).

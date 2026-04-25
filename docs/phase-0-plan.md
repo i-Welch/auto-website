@@ -13,19 +13,18 @@ No AWS. No Fargate. No SQS. No CloudFront. Everything is Netlify + a small set o
 
 ## Step 1 — Decisions to lock in 👤
 
-Paste these in chat:
+Locked in:
 
-| Need | Why | Example |
-|---|---|---|
-| **Brand name (display)** | Hero copy, email from-name | `LocalPulse` |
-| **Brand slug (lowercase, no spaces)** | npm scope, env prefixes | `localpulse` |
-| **Apex domain** (or "later") | Netlify custom domain | `localpulse.com` |
-| **Operator email** | Where ops alerts go | `you@example.com` |
+| Decision | Value |
+|---|---|
+| Brand name (display) | **GrowOnline** |
+| Brand slug | **growonline** |
+| npm scope | **@growonline** |
+| Apex domain | **growonline.app** |
+| Subdomain layout | apex → landing, `app.growonline.app` → dashboard, `*.growonline.app` → customer demo + live sites |
+| Operator email | `isaac.welch@upstart.com` (change if you want a separate ops address) |
 
-Defaults if you say "use whatever":
-- Brand: `auto-website` / `@auto-website`
-- Domain: defer (we use Netlify-issued URLs)
-- Operator email: your `isaac.welch@upstart.com`
+Note: `.app` is HSTS-preloaded, so HTTPS is mandatory. Netlify's auto-provisioned Let's Encrypt certs handle this; just don't expect plain-HTTP fallback to work anywhere.
 
 ---
 
@@ -63,7 +62,7 @@ Create the ones you don't already have. Don't paste keys yet — Step 4 lists wh
 | **Netlify** | https://app.netlify.com | Free tier OK for MVP. Connect GitHub. |
 | **Inngest** | https://app.inngest.com | Free tier covers ~50k function runs/month. Sign in with GitHub. |
 | **Resend** | https://resend.com | Free tier 3k emails/month. Add a domain later for production sending. |
-| **Sentry** | https://sentry.io | Free dev tier. Create project `auto-website` (Next.js platform). |
+| **Sentry** | https://sentry.io | Free dev tier. Create project `growonline` (Next.js platform). |
 | **Anthropic** | https://console.anthropic.com | Create API key. |
 | **Stripe** | https://dashboard.stripe.com | Test mode. |
 | **Twilio** | https://www.twilio.com/console | Don't buy a number yet (Phase 5). |
@@ -145,7 +144,7 @@ You then:
 
 ```bash
 pnpm install
-pnpm -F @auto-website/db build
+pnpm -F @growonline/db build
 ```
 
 ✅ DB package compiles. (We run migrations against Neon in Step 8.)
@@ -168,8 +167,8 @@ Local migration run against the freshly provisioned Neon DB:
 
 ```bash
 export DATABASE_URL='<paste from Step 7>'
-pnpm -F @auto-website/db db:migrate
-pnpm -F @auto-website/db db:studio   # optional, opens Drizzle Studio
+pnpm -F @growonline/db db:migrate
+pnpm -F @growonline/db db:studio   # optional, opens Drizzle Studio
 ```
 
 ✅ Tables `business`, `business_source`, `contact`, `business_audit` exist.
@@ -194,7 +193,7 @@ You then locally:
 
 ```bash
 pnpm install
-pnpm -F @auto-website/landing dev   # http://localhost:3000
+pnpm -F @growonline/landing dev   # http://localhost:3000
 ```
 
 ✅ Each app boots locally without errors.
@@ -214,11 +213,11 @@ For each of the 5 apps below, in Netlify dashboard:
 
 | Site name | Base dir | What it serves |
 |---|---|---|
-| `<brand>-landing` | `apps/landing` | apex domain in Step 13 |
-| `<brand>-dashboard` | `apps/dashboard` | `app.<domain>` |
-| `<brand>-live-sites` | `apps/live-sites` | wildcard `*.<domain>` |
-| `<brand>-assistant` | `apps/assistant` | called by Twilio webhook |
-| `<brand>-workers` | `apps/workers` | called by Inngest |
+| `growonline-landing` | `apps/landing` | apex domain in Step 13 |
+| `growonline-dashboard` | `apps/dashboard` | `app.growonline.app` |
+| `growonline-live-sites` | `apps/live-sites` | wildcard `*.growonline.app` |
+| `growonline-assistant` | `apps/assistant` | called by Twilio webhook |
+| `growonline-workers` | `apps/workers` | called by Inngest |
 
 ✅ All five sites build green and serve their `*.netlify.app` URLs.
 
@@ -226,8 +225,8 @@ For each of the 5 apps below, in Netlify dashboard:
 
 ## Step 11 — Wire Inngest to the workers site 👤 + 🤖
 
-1. 👤 In Inngest dashboard → **Apps → New App** → name `auto-website`. Copy the `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` (you put these in Step 4's list).
-2. 👤 Add both to the `<brand>-workers` site's env vars in Netlify.
+1. 👤 In Inngest dashboard → **Apps → New App** → name `growonline`. Copy the `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` (you put these in Step 4's list).
+2. 👤 Add both to the `growonline-workers` site's env vars in Netlify.
 3. 👤 Register the workers app's Inngest URL: `https://<workers-site>.netlify.app/api/inngest` in the Inngest dashboard.
 4. 🤖 The workers site already has `/api/inngest` serving an Inngest handler with one demo function `db.healthcheck` that runs `SELECT NOW()` against `DATABASE_URL` and writes a row to a `_healthcheck` table.
 5. 👤 In the Inngest dashboard → **Functions** → trigger `db.healthcheck` manually.
@@ -255,14 +254,14 @@ Skip if deferring the domain.
 
 1. 👤 Buy domain (Cloudflare Registrar at-cost) or move it onto Cloudflare DNS.
 2. 👤 In Netlify, on each site, add the appropriate custom domain:
-   - `<brand>-landing` → apex `<domain>`
-   - `<brand>-dashboard` → `app.<domain>`
-   - `<brand>-live-sites` → wildcard `*.<domain>` (Pro tier or higher required for wildcard custom domains; verify your plan)
-   - `<brand>-assistant` and `<brand>-workers` → no public custom domains needed; keep `.netlify.app`
+   - `growonline-landing` → apex `growonline.app`
+   - `growonline-dashboard` → `app.growonline.app`
+   - `growonline-live-sites` → wildcard `*.growonline.app` (Pro tier or higher required for wildcard custom domains; verify your plan)
+   - `growonline-assistant` and `growonline-workers` → no public custom domains needed; keep `.netlify.app`
 3. 👤 Follow Netlify's DNS instructions (records depend on whether you use Netlify DNS or external).
 4. 🤖 I'll ship a small script `scripts/dns-check.ts` that polls until cert + DNS are healthy.
 
-✅ Visiting `https://<domain>` returns the landing site over HTTPS. `https://app.<domain>` returns the dashboard.
+✅ Visiting `https://growonline.app` returns the landing site over HTTPS. `https://app.growonline.app` returns the dashboard.
 
 ---
 
@@ -287,7 +286,7 @@ Final checklist:
 
 Originally listed in `mvp-plan.md` Phase 0; cheaper to add when their phase needs them:
 - Resend domain verification + warmup → Phase 3 (Outreach).
-- Wildcard `*.<domain>` cert if your Netlify plan doesn't include it yet → Phase 2 (Demo builder) — that's when the wildcard is actually used.
+- Wildcard `*.growonline.app` cert if your Netlify plan doesn't include it yet → Phase 2 (Demo builder) — that's when the wildcard is actually used.
 - hCaptcha site/secret keys → Phase 5.5 (Landing analysis).
 - Twilio number → Phase 5 (Assistant).
 - Google Maps + Yelp keys → Phase 1 (Discovery).
@@ -296,10 +295,11 @@ Originally listed in `mvp-plan.md` Phase 0; cheaper to add when their phase need
 
 ## Open questions before we start at Step 2
 
-1. Brand name + slug + domain (or "use defaults / defer domain")?
-2. Drizzle ORM OK, or do you want Prisma instead?
-3. Inngest OK as the workflow layer, or do you want to start with raw Netlify Scheduled + Background Functions and add Inngest later?
-4. Operator-dashboard auth at MVP: **email magic-link via Resend** (simplest, no third party) — confirm or pick something else (Clerk, Auth.js w/ providers)?
-5. One Netlify team for all five sites, or split (e.g. operator-only sites in a private team)?
+Brand + domain locked. Remaining:
+
+1. **ORM:** Drizzle (recommended — light, JSONB-friendly, SQL-first) or Prisma (heavier, schema-first)?
+2. **Workflow layer:** Inngest (recommended) or pure Netlify Scheduled + Background and add Inngest only when we hit its limits?
+3. **Operator-dashboard auth:** email magic-link via Resend (simplest, no third party) or something else (Clerk, Auth.js)?
+4. **Team layout:** one Netlify team for all five sites, or split (e.g. operator dashboard in a private team)?
 
 Answer those and we run Step 2.
