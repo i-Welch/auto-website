@@ -19,9 +19,9 @@ Autonomous system that discovers SMBs with weak online presence, builds personal
 
 ## Product surfaces
 - **Marketing landing page** (`growonline.app`) — inbound top of funnel. See "Landing page" section.
-- **Lead-facing:** demo sites (S3/CloudFront), outreach messages, landing page on demo expiration.
-- **Customer-facing:** live Next.js site (Vercel), Twilio SMS assistant, weekly email reports, magic-link email auth.
-- **Operator-facing:** internal dashboard for human-in-loop review of outreach, directory submission tasks, billing escalations, service-module config.
+- **Lead-facing:** demo sites (multi-tenant Next.js on Netlify, served from Blobs), outreach messages, landing page on demo expiration.
+- **Customer-facing:** live Next.js site on the same multi-tenant app, Twilio SMS assistant, weekly email reports, magic-link email auth.
+- **Operator-facing:** **no GUI**. Operators are technical and work via the operator API (`api.growonline.app`, bearer-auth), CLI scripts in `scripts/`, direct DB access (Drizzle Studio / Neon console / psql), and LLM-driven workflows. Notifications for things needing human attention go to an operator email.
 
 ## Landing page
 The public marketing site at the apex domain. Also functions as a second top-of-funnel by generating inbound leads via a free SEO/quality analysis tool.

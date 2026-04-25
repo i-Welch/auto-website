@@ -6,7 +6,7 @@
 growonline/   # repo dir on disk is `auto-website` for historical reasons
   apps/
     landing/                  # Next.js on Netlify — public marketing site + public API routes
-    dashboard/                # Next.js on Netlify — operator UI + protected API routes
+    api/                      # Netlify Functions — bearer-auth'd operator API (the "no-dashboard" backbone)
     live-sites/               # Next.js on Netlify — multi-tenant, serves all demo + live customer sites by subdomain
     assistant/                # Netlify Functions site — Twilio webhook + Claude tool-use loop
     workers/                  # Netlify Functions site — Inngest functions for discovery, outreach, sitegen, analysis
@@ -20,9 +20,10 @@ growonline/   # repo dir on disk is `auto-website` for historical reasons
     sitegen/                  # template forking, AI customization, build, deploy
     llm/                      # wrapped Claude client, prompt cache helpers
     shared/                   # types, env schema (Zod), utilities
+  scripts/                    # operator CLI scripts that wrap the operator API for common ops tasks
 ```
 
-TypeScript end-to-end. Shared types via `packages/shared`. Five Netlify sites total, all in one repo (per-site `netlify.toml` declares base directory).
+TypeScript end-to-end. Shared types via `packages/shared`. Five Netlify sites total, all in one repo (per-site `netlify.toml` declares base directory). **No internal-operator UI** — operators work via the API, scripts, direct DB access, and LLMs. See "Operator interface" below.
 
 ## Deployment (all-Netlify)
 
@@ -30,13 +31,13 @@ Everything ships on Netlify primitives. No AWS account required for MVP. Long-ru
 
 | Component | Service |
 |---|---|
-| Landing site (`apps/landing`) | Netlify site (Next.js) |
-| Operator dashboard (`apps/dashboard`) | Netlify site (Next.js, behind auth) |
-| Multi-tenant customer sites (demo + live) (`apps/live-sites`) | Netlify site (Next.js), wildcard custom domain `*.growonline.app` |
-| Assistant (Twilio webhook) (`apps/assistant`) | Netlify site (Functions only) |
-| Workers (`apps/workers`) | Netlify site (Inngest functions running on Netlify Functions) |
-| Public API + webhooks (Stripe, Twilio, form posts) | Colocated as Next.js route handlers in `landing` and `dashboard`, or Netlify Functions in dedicated sites |
-| Workflow / queue / cron / retries | **Inngest** (third-party, free tier ample for MVP) |
+| Landing site (`apps/landing`) | Netlify site (Next.js), apex `growonline.app` |
+| Operator API (`apps/api`) | Netlify site (Functions only), bearer-auth, `api.growonline.app` |
+| Multi-tenant customer sites (demo + live) (`apps/live-sites`) | Netlify site (Next.js), wildcard `*.growonline.app` |
+| Assistant (Twilio webhook) (`apps/assistant`) | Netlify site (Functions only), no public custom domain |
+| Workers (`apps/workers`) | Netlify site (Scheduled + Background Functions), no public custom domain |
+| Public webhooks (Stripe, Twilio, form posts) | Colocated as Next.js route handlers in `landing`, or as functions in `assistant` (Twilio), `api` (Stripe) |
+| Workflow / queue / cron / retries | **Netlify Scheduled + Background Functions** at MVP (cron via `netlify.toml`, fan-out by direct fetch invocation, retries hand-rolled). Migrate to **Inngest** when durable-step orchestration / fan-out / sleep / retries become painful — likely Phase 1 or 3. |
 | Primary DB | **Netlify DB (Neon Postgres)** with JSONB columns |
 | Object storage | **Netlify Blobs** (built static demo artifacts, image originals) |
 | Image transforms | **Netlify Image CDN** |
@@ -50,7 +51,7 @@ Everything ships on Netlify primitives. No AWS account required for MVP. Long-ru
 
 **DB:** Netlify DB (Neon Postgres) with JSONB columns for the document-shaped business aggregate. The data-access layer (`packages/db`, Drizzle) hides JSONB path expressions behind typed helpers.
 
-**Why Inngest:** Netlify has no native queue / fan-out / retry primitives — only cron + background-fire-and-forget. Inngest gives us durable steps, retries, scheduled events, fan-out, sleep, and a dashboard, while still running the actual function code on Netlify Functions. Without it we'd reinvent state machines on top of cron + DB rows.
+**Workflow stance:** start with raw Netlify Scheduled + Background Functions. They cover Phase 0 + most of Phase 1. We accept the tradeoff that retries, fan-out, and durable multi-step workflows are hand-rolled (state in DB, idempotent steps, max-N retry counters in row) — fine while volume is low. The moment we want clean durable steps with sleep/retry/fan-out (likely the outreach orchestrator or sitegen pipeline), we adopt **Inngest** as a thin layer on top of the same Netlify Functions. Migration is mechanical because functions stay in Netlify either way.
 
 **What does not fit serverless and how we cope:**
 - *Long crawls* (data source pagination, hours of work) — chunked into 15-min Inngest steps with a cursor in DB. Each step picks up where the last left off.
@@ -153,14 +154,14 @@ Declarative per-niche playbook: ordered steps with wait/skip conditions. AI draf
 
 ## Site generation pipeline
 
-Implemented as an Inngest function in `apps/workers`. Single Background Function invocation handles the full build for a small site (well under the 15-min cap).
+Implemented in `apps/workers` as a single Netlify Background Function (`sitegen-build-background`). One invocation handles the full build for a small site (~30-90s, well under the 15-min cap). When we adopt Inngest, each numbered step below becomes an Inngest step with retries.
 
-1. Trigger: business passes score threshold + has sufficient data, or analysis-request CTA fires, or operator forces a rebuild.
-2. Inngest step `prepare-workspace`: pull business record, clone `demo-template-contractor` into a tmp directory.
-3. Inngest step `customize`: Claude tool-use loop edits TSX (hero copy, services, photos, NAP, CTA). Edits constrained to a file allowlist.
-4. Inngest step `build`: `pnpm next build` → static export to `out/`. Failure here aborts the version flip; current live version remains.
-5. Inngest step `upload`: write `out/` to **Netlify Blobs** under `demos/{slug}/v{N}/`.
-6. Inngest step `flip-pointer`: update `demo_site.current_version = N`.
+1. Trigger: business passes score threshold + has sufficient data, or analysis-request CTA fires, or operator forces a rebuild via the operator API.
+2. `prepare-workspace`: pull business record, clone `demo-template-contractor` into a tmp directory.
+3. `customize`: Claude tool-use loop edits TSX (hero copy, services, photos, NAP, CTA). Edits constrained to a file allowlist.
+4. `build`: `pnpm next build` → static export to `out/`. Failure here aborts the version flip; current live version remains.
+5. `upload`: write `out/` to **Netlify Blobs** under `demos/{slug}/v{N}/`.
+6. `flip-pointer`: update `demo_site.current_version = N`.
 7. `apps/live-sites` middleware reads the slug from the host, looks up `current_version`, and serves the matching blob prefix. No CDN invalidation needed — the pointer is the source of truth.
 
 On conversion:
@@ -214,12 +215,35 @@ Public marketing site, deployed to Netlify at the apex domain. Apex (`growonline
 - Per-IP + per-email throttling in the API route.
 - Disposable-email-domain blocklist.
 
+## Operator interface (no dashboard)
+
+There is no operator GUI at MVP. All operators are technical and work via:
+
+1. **Operator API** (`apps/api`, bearer-auth, `api.growonline.app`) — every operator action is an HTTP endpoint. Examples (non-exhaustive):
+   - `GET /businesses?filter=...` — list/search businesses with full record JSON.
+   - `GET /businesses/:id` / `PATCH /businesses/:id` — inspect/edit.
+   - `GET /outreach/pending` / `POST /outreach/:id/approve` / `POST /outreach/:id/reject` — review queue (human-in-the-loop drafts).
+   - `POST /sitegen/rebuild?slug=...` — force a demo rebuild.
+   - `POST /scoring/weights` — update scoring config.
+   - `GET /operator-tasks` / `POST /operator-tasks/:id/resolve` — escalation queue.
+   - `POST /customers/:id/cancel` — billing actions.
+2. **CLI scripts** (`scripts/`) — small TypeScript wrappers around the API for common ops, runnable via `pnpm tsx scripts/<name>.ts`. They read `OPERATOR_API_KEY` from env. Examples: `outreach-review.ts`, `business-inspect.ts <id>`, `force-rebuild.ts <slug>`, `daily-report.ts`.
+3. **Direct DB access** — operators connect to Neon via Drizzle Studio (`pnpm db:studio`), the Neon web console, or `psql` for ad-hoc queries. Read-only operator role recommended for routine inspection; full credentials only for deliberate writes.
+4. **LLM-driven workflows** — because the operator API is well-typed and the schema is in code, operators can hand the OpenAPI spec (or a hand-curated tool list) to Claude/Cursor/Claude Code and have an LLM execute multi-step tasks ("approve all pending outreach for businesses with score > 80 in Austin"). A future enhancement is a small **MCP server** wrapping the operator API as tools — explicitly post-MVP.
+5. **Email notifications** — when human attention is needed (escalations from the assistant, contact-form submissions, billing failures, draft-reviews-piling-up), a Resend email goes to the operator address. The body includes deep links into the operator API or pre-built CLI commands the operator can copy-paste.
+
+**Auth:** the operator API uses long-lived bearer tokens (`OPERATOR_API_KEY`) issued out-of-band and stored in each operator's local `.env`. Tokens are scoped to a role (read-only vs full). Rotated manually. No login UI, no session cookies, no SSO at MVP.
+
+**Why no dashboard:** every dashboard view is a query against data we already store. Building a UI for each is gold-plating. Operators are technical and prefer scripts + direct queries over click-paths. We can always add a thin Retool/Internal/custom UI later if non-technical operators come on board.
+
+(Reserved subdomain: `dash.growonline.app` is intentionally unused for now. If we ever build an operator UI, that's its address.)
+
 ## Security / access
 - Stripe webhook signature verified.
 - Twilio webhook signature verified.
 - Inngest webhooks verified via signing key.
-- Magic-link tokens single-use, 15-min TTL.
-- Operator dashboard behind email magic-link auth (no separate SSO for MVP).
+- Customer magic-link tokens (post-Stripe checkout) single-use, 15-min TTL.
+- Operator API behind bearer token (`OPERATOR_API_KEY`), role-scoped (read-only / full), constant-time comparison, rotated manually.
 - Netlify Blobs accessed only via server-side functions with the site's Blobs scope; no public read URLs.
 - No customer logins in MVP — everything happens via SMS.
 

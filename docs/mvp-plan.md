@@ -9,11 +9,11 @@ Constraint: single operator (you) + AI coding assistance. Keep infra small, defe
 ### Phase 0 — Foundations (week 1)
 Stand up scaffolding so all later work has a place to land. **All-Netlify, no AWS.** Walk-through in `phase-0-plan.md`.
 - Monorepo (pnpm + Turborepo), TypeScript, shared ESLint/Prettier.
-- Five Netlify sites in one repo: `apps/landing`, `apps/dashboard`, `apps/live-sites`, `apps/assistant`, `apps/workers`. Each connected to GitHub for auto-deploy.
+- Five Netlify sites in one repo: `apps/landing`, `apps/api`, `apps/live-sites`, `apps/assistant`, `apps/workers`. Each connected to GitHub for auto-deploy. **No operator dashboard** — operators use the bearer-auth'd API + scripts + DB.
 - Provision **Netlify DB (Neon Postgres)**. `packages/db` (Drizzle) with initial migrations (`business`, `business_source`, `contact`, `business_audit`).
 - **Inngest** wired to `apps/workers` for durable workflows / cron / fan-out / retries.
 - **Resend** account + Sentry project. Env vars in Netlify per site.
-- (Optional, only if domain ready) Custom domains: apex → landing, `app.` → dashboard, `*.` wildcard → live-sites.
+- (Optional, only if domain ready) Custom domains: apex → landing, `api.` → operator API, `*.` wildcard → live-sites. (`dash.growonline.app` reserved for a future operator UI; unused at MVP.)
 - **Done when:** all 5 sites build green, `db.healthcheck` Inngest function runs end-to-end against Neon, Sentry captures errors from web + workers, CI green on `master`.
 
 ### Phase 1 — Discovery for Austin contractors (week 2)
@@ -45,7 +45,7 @@ Email only for MVP. SMS/postcard deferred.
 - `packages/outreach` channel interface + SES email adapter.
 - Rule engine with one playbook for contractors: day-0 email, day-3 follow-up, day-10 final.
 - LLM-authored personalization (hyper-personalized per business) with prompt caching.
-- Human-in-loop review: dashboard queue of drafted emails, operator approves/edits before send.
+- Human-in-loop review via the operator API: drafts are persisted with status `pending_review`. Operator runs `pnpm tsx scripts/outreach-review.ts` to list/edit/approve/reject — script wraps `GET /outreach/pending` + `POST /outreach/:id/approve|reject`.
 - Unsubscribe link + do-not-contact list enforcement.
 - Inbound reply tracking (SES inbound → `outreach_event`).
 - **Done when:** 50 emails sent (operator-approved), open/click tracking working, at least 1 reply.
@@ -98,7 +98,7 @@ Ship outreach, iterate, hit 10 paying.
 - Domain research / purchase automation
 - Square/Toast/Clover review integration
 - Demo-expiration re-engagement landing page
-- Operator dashboard beyond outreach review queue
+- Operator UI of any kind (we use API + scripts + DB instead; `dash.growonline.app` reserved if ever needed)
 - Tiered pricing
 - White-label / multi-tenant for agencies
 - PII compliance tooling

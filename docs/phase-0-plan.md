@@ -21,7 +21,7 @@ Locked in:
 | Brand slug | **growonline** |
 | npm scope | **@growonline** |
 | Apex domain | **growonline.app** |
-| Subdomain layout | apex → landing, `app.growonline.app` → dashboard, `*.growonline.app` → customer demo + live sites |
+| Subdomain layout | apex → landing, `api.growonline.app` → operator API, `*.growonline.app` → customer demo + live sites. `dash.growonline.app` reserved (no UI for MVP). |
 | Operator email | `isaac.welch@upstart.com` (change if you want a separate ops address) |
 
 Note: `.app` is HSTS-preloaded, so HTTPS is mandatory. Netlify's auto-provisioned Let's Encrypt certs handle this; just don't expect plain-HTTP fallback to work anywhere.
@@ -60,7 +60,7 @@ Create the ones you don't already have. Don't paste keys yet — Step 4 lists wh
 | Service | URL | Notes |
 |---|---|---|
 | **Netlify** | https://app.netlify.com | Free tier OK for MVP. Connect GitHub. |
-| **Inngest** | https://app.inngest.com | Free tier covers ~50k function runs/month. Sign in with GitHub. |
+| ~~Inngest~~ | — | **Deferred**. Starting with raw Netlify Scheduled + Background Functions. Add Inngest if/when we need durable retries or fan-out. |
 | **Resend** | https://resend.com | Free tier 3k emails/month. Add a domain later for production sending. |
 | **Sentry** | https://sentry.io | Free dev tier. Create project `growonline` (Next.js platform). |
 | **Anthropic** | https://console.anthropic.com | Create API key. |
@@ -88,8 +88,7 @@ STRIPE_WEBHOOK_SECRET=      (LATER — generated in Phase 4)
 TWILIO_ACCOUNT_SID=         LATER
 TWILIO_AUTH_TOKEN=          LATER
 RESEND_API_KEY=
-INNGEST_EVENT_KEY=          (Inngest dashboard → Events → create key)
-INNGEST_SIGNING_KEY=        (Inngest dashboard → Apps → reveal signing key)
+OPERATOR_API_KEY=           (we generate this in Step 9 — `openssl rand -hex 32`)
 GOOGLE_PLACES_API_KEY=      LATER
 YELP_API_KEY=               LATER
 HCAPTCHA_SITE_KEY=          LATER
@@ -181,11 +180,15 @@ I create:
 
 ```
 apps/landing/        — Next.js 15 + Tailwind. /, /api/health, Sentry wired.
-apps/dashboard/      — Next.js 15 + Tailwind. /, /api/me (placeholder).
+apps/api/            — Netlify Functions site. Bearer-auth middleware. /healthz (anon), /me (auth) returns the calling token's role.
 apps/live-sites/     — Next.js 15. middleware reads host → DB → renders placeholder. No-op for unknown subdomains.
 apps/assistant/      — Netlify Functions site. /twilio (signature-verified placeholder).
-apps/workers/        — Netlify Functions site + Inngest. /api/inngest serves the Inngest handler with one demo function.
+apps/workers/        — Netlify Functions site. One Scheduled Function `cron-healthcheck` (every 5 min) and one Background Function `db-healthcheck-background` that both run a DB query and write to `_healthcheck`.
 ```
+
+Plus `scripts/` at repo root with two starter scripts:
+- `scripts/operator-ping.ts` — calls `GET https://<api-site>.netlify.app/me` with `OPERATOR_API_KEY` and prints the response.
+- `scripts/db-stats.ts` — connects to Neon directly and prints row counts per table.
 
 Plus per-app `netlify.toml` declaring the base directory and build command. Plus a `packages/shared` `loadEnv()` helper that reads + validates env vars per app.
 
@@ -213,8 +216,8 @@ For each of the 5 apps below, in Netlify dashboard:
 
 | Site name | Base dir | What it serves |
 |---|---|---|
-| `growonline-landing` | `apps/landing` | apex domain in Step 13 |
-| `growonline-dashboard` | `apps/dashboard` | `app.growonline.app` |
+| `growonline-landing` | `apps/landing` | apex `growonline.app` |
+| `growonline-api` | `apps/api` | `api.growonline.app` (operator API) |
 | `growonline-live-sites` | `apps/live-sites` | wildcard `*.growonline.app` |
 | `growonline-assistant` | `apps/assistant` | called by Twilio webhook |
 | `growonline-workers` | `apps/workers` | called by Inngest |
@@ -223,15 +226,19 @@ For each of the 5 apps below, in Netlify dashboard:
 
 ---
 
-## Step 11 — Wire Inngest to the workers site 👤 + 🤖
+## Step 11 — Verify workers + scheduled functions 👤 + 🤖
 
-1. 👤 In Inngest dashboard → **Apps → New App** → name `growonline`. Copy the `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` (you put these in Step 4's list).
-2. 👤 Add both to the `growonline-workers` site's env vars in Netlify.
-3. 👤 Register the workers app's Inngest URL: `https://<workers-site>.netlify.app/api/inngest` in the Inngest dashboard.
-4. 🤖 The workers site already has `/api/inngest` serving an Inngest handler with one demo function `db.healthcheck` that runs `SELECT NOW()` against `DATABASE_URL` and writes a row to a `_healthcheck` table.
-5. 👤 In the Inngest dashboard → **Functions** → trigger `db.healthcheck` manually.
+1. 🤖 The `growonline-workers` site has:
+   - `cron-healthcheck.ts` — a **Netlify Scheduled Function** declared in `netlify.toml` to run every 5 minutes. Inserts a row into `_healthcheck` with `source='scheduled'`.
+   - `db-healthcheck-background.ts` — a **Netlify Background Function** (`*-background.ts` naming convention) that does the same insert with `source='background'`. Triggered manually for verification.
+2. 👤 Trigger the background function once: `curl -X POST https://growonline-workers.netlify.app/.netlify/functions/db-healthcheck-background`.
+3. 👤 Wait up to 5 minutes for the scheduled function to fire on its own.
+4. 👤 Confirm both rows exist:
+   ```bash
+   psql "$DATABASE_URL" -c "select source, count(*) from _healthcheck group by source;"
+   ```
 
-✅ Inngest run shows `success`, the workers site logs the timestamp, the `_healthcheck` row exists in Neon.
+✅ `_healthcheck` has rows from both `scheduled` and `background`. Function logs in the Netlify dashboard show successful executions.
 
 ---
 
@@ -255,13 +262,13 @@ Skip if deferring the domain.
 1. 👤 Buy domain (Cloudflare Registrar at-cost) or move it onto Cloudflare DNS.
 2. 👤 In Netlify, on each site, add the appropriate custom domain:
    - `growonline-landing` → apex `growonline.app`
-   - `growonline-dashboard` → `app.growonline.app`
+   - `growonline-api` → `api.growonline.app`
    - `growonline-live-sites` → wildcard `*.growonline.app` (Pro tier or higher required for wildcard custom domains; verify your plan)
    - `growonline-assistant` and `growonline-workers` → no public custom domains needed; keep `.netlify.app`
 3. 👤 Follow Netlify's DNS instructions (records depend on whether you use Netlify DNS or external).
 4. 🤖 I'll ship a small script `scripts/dns-check.ts` that polls until cert + DNS are healthy.
 
-✅ Visiting `https://growonline.app` returns the landing site over HTTPS. `https://app.growonline.app` returns the dashboard.
+✅ Visiting `https://growonline.app` returns the landing site over HTTPS. `https://api.growonline.app/healthz` returns `{ ok: true }`. `https://api.growonline.app/me` returns 401 without a bearer, 200 with the right token.
 
 ---
 
@@ -270,10 +277,11 @@ Skip if deferring the domain.
 Final checklist:
 - [ ] All 5 Netlify sites green and reachable.
 - [ ] `apps/landing/api/health` returns 200.
-- [ ] Workers site's `/api/inngest` endpoint registered with Inngest.
-- [ ] `db.healthcheck` Inngest function ran successfully end-to-end.
-- [ ] `_healthcheck` row exists in Neon.
-- [ ] Sentry has events from both web and workers, separable by tag.
+- [ ] `apps/api/healthz` returns 200; `/me` requires bearer token.
+- [ ] `scripts/operator-ping.ts` succeeds with the issued `OPERATOR_API_KEY`.
+- [ ] Workers site's scheduled function fires at least once on its own; background function fires on POST.
+- [ ] `_healthcheck` table has both `scheduled` and `background` rows.
+- [ ] Sentry has events from landing, api, and workers, separable by service tag.
 - [ ] CI green on `master`.
 - [ ] `pnpm db:migrate` is reproducible (drop DB → re-migrate → schema rebuilt cleanly).
 - [ ] Phase-0 docs reflect the all-Netlify reality (this file + `architecture.md` + `mvp-plan.md`).
@@ -293,13 +301,12 @@ Originally listed in `mvp-plan.md` Phase 0; cheaper to add when their phase need
 
 ---
 
-## Open questions before we start at Step 2
+## Decisions locked in
 
-Brand + domain locked. Remaining:
+- **Brand:** GrowOnline / `growonline` / `@growonline` / `growonline.app`.
+- **ORM:** Drizzle.
+- **Workflow layer:** start with raw Netlify Scheduled + Background Functions. Inngest deferred — revisit when we need durable retries / fan-out / step orchestration (likely Phase 1 or 3).
+- **Operator interface:** no GUI. Bearer-auth'd operator API + scripts + direct DB. `dash.growonline.app` reserved if a UI ever happens.
+- **Netlify team:** one team for all five sites.
 
-1. **ORM:** Drizzle (recommended — light, JSONB-friendly, SQL-first) or Prisma (heavier, schema-first)?
-2. **Workflow layer:** Inngest (recommended) or pure Netlify Scheduled + Background and add Inngest only when we hit its limits?
-3. **Operator-dashboard auth:** email magic-link via Resend (simplest, no third party) or something else (Clerk, Auth.js)?
-4. **Team layout:** one Netlify team for all five sites, or split (e.g. operator dashboard in a private team)?
-
-Answer those and we run Step 2.
+Ready to run Step 2.
