@@ -9,11 +9,13 @@ Constraint: single operator (you) + AI coding assistance. Keep infra small, defe
 ### Phase 0 — Foundations (week 1)
 Stand up scaffolding so all later work has a place to land.
 - Monorepo (pnpm + Turborepo), TypeScript, shared ESLint/Prettier.
-- `packages/db` with Postgres + JSONB schema (initial migrations for `business`, `business_source`, `contact`, `audit`).
-- AWS account: VPC, ECR, ECS cluster, RDS Postgres, S3 demo bucket, SES verified domain, Sentry project.
-- GitHub Actions → ECR → ECS deploy pipeline.
-- Env var management via SSM.
-- **Done when:** empty API deployed, DB migrations run in CI, Sentry capturing errors.
+- Netlify team + sites for `apps/landing`, `apps/dashboard`, `apps/api`, `apps/live-sites`. Connect GitHub for auto-deploy on push.
+- Provision **Netlify DB (Neon Postgres)**. `packages/db` with initial migrations (`business`, `business_source`, `contact`, audit). Migration runner wired into CI.
+- AWS account (workers only): VPC, ECR, small ECS cluster, SQS queues, S3 demo bucket, SES verified domain.
+- Wildcard cert + DNS for `*.yourbrand.com` → CloudFront → S3 demos.
+- Sentry project. Env vars set in Netlify (web) and SSM (workers).
+- GitHub Actions: Netlify deploys via Netlify CLI / Git integration; worker deploys via ECR → ECS.
+- **Done when:** landing site is live at `yourbrand.com`, a hello-world Netlify Function responds, a Fargate worker can read/write Neon, Sentry captures an error from each.
 
 ### Phase 1 — Discovery for Austin contractors (week 2)
 Narrow, focused discovery — just enough to produce a candidate list.
@@ -52,7 +54,7 @@ Email only for MVP. SMS/postcard deferred.
 Turn a demo into a paying customer.
 - Stripe product + price ($50/mo). Checkout link on every demo.
 - Stripe webhook → customer record + magic-link email.
-- Multi-tenant live-site Next.js app on Vercel: reads business config from DB, renders same template dynamically. Routed via subdomain.
+- Multi-tenant live-site Next.js app on Netlify (`apps/live-sites`): reads business config from DB, renders same template dynamically. Routed via subdomain.
 - On conversion, flip demo subdomain to serve the live app instead of the S3 static. 301 at the edge.
 - **Done when:** end-to-end test — demo → Stripe test payment → magic-link click → live site visible at subdomain.
 
@@ -68,7 +70,7 @@ The retention story.
 
 ### Phase 5.5 — Landing page + free analysis (week 7, parallel with assistant)
 Inbound funnel. Can be built in parallel with the assistant since they share no code.
-- `apps/landing` on Vercel at `yourbrand.com`: hero, how-it-works, sample gallery, pricing, contact, analyze CTA.
+- `apps/landing` on Netlify at `yourbrand.com`: hero, how-it-works, sample gallery, pricing, contact, analyze CTA.
 - `/analyze` form (URL + email, hCaptcha, MX check) → `POST /api/analyze` → `analysis_request` row + SQS job.
 - `worker-analysis`: headless Chrome Lighthouse runner + reuse presence-scoring checks (NAP, GBP, directories). Writes report JSON.
 - SES email with the report + CTA to an auto-built demo (triggers `worker-sitegen` against the submitted business).

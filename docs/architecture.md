@@ -5,14 +5,15 @@
 ```
 auto-website/
   apps/
-    api/                # main backend API (HTTP + webhook endpoints)
-    worker-discovery/   # long-running workers: data source crawlers
-    worker-outreach/    # outreach dispatcher (scheduled + event-driven)
-    worker-sitegen/     # demo/live site generation + deploy
-    assistant/          # Twilio webhook handler + Claude tool-use loop
-    dashboard/          # internal operator UI (Next.js)
-    landing/            # public marketing site at yourbrand.com (Next.js on Vercel)
-    worker-analysis/    # runs site-analysis audits from landing-page submissions
+    landing/            # public marketing site at yourbrand.com (Next.js on Netlify)
+    dashboard/          # operator UI (Next.js on Netlify, behind auth)
+    api/                # Netlify Functions: webhooks, form posts, short APIs
+    assistant/          # Twilio webhook (Netlify Function) + Claude tool-use loop
+    live-sites/         # multi-tenant Next.js app serving customer sites (Netlify)
+    worker-discovery/   # Fargate worker: data source crawlers
+    worker-outreach/    # Fargate worker: outreach dispatcher (scheduled + event-driven)
+    worker-sitegen/     # Fargate worker: demo/live site generation + deploy, warm sandboxes
+    worker-analysis/    # Fargate worker: site-analysis audits from landing submissions
     demo-template-contractor/  # Next.js template, the "fork source" for site gen
   packages/
     db/                 # data access layer, schemas, migrations
@@ -29,26 +30,33 @@ auto-website/
 
 TypeScript end-to-end. Shared types via `packages/shared`.
 
-## Deployment (AWS)
+## Deployment (Netlify-first hybrid)
+
+Web surfaces, short-lived APIs, and the database run on Netlify. Long-running and stateful workers run on a small Fargate cluster (only place Netlify can't go: 15-min function cap and no warm pinned sandboxes). Demo static hosting stays on S3+CloudFront for wildcard-subdomain ergonomics and the versioned-path scheme used by the live-edit flow.
 
 | Component | Service |
 |---|---|
-| API, assistant webhook, dashboard | ECS Fargate behind ALB |
-| Workers (discovery, outreach, sitegen) | ECS Fargate, queue-driven |
+| Landing site (`apps/landing`) | Netlify (Next.js) |
+| Operator dashboard (`apps/dashboard`) | Netlify (Next.js, behind auth) |
+| Public API + webhooks (Stripe, Twilio, SES inbound, form posts) | Netlify Functions |
+| Edge routing for demos / live sites | Netlify Edge Functions (where colocated) + CloudFront Functions for `*.yourbrand.com` lookups |
+| Primary DB | **Netlify DB (Neon Postgres)** with JSONB columns |
+| Long-running workers (`worker-discovery`, `worker-outreach`, `worker-sitegen`, `worker-analysis`) | ECS Fargate, queue-driven |
 | Job queue | SQS (one queue per worker class) |
 | Scheduled triggers | EventBridge cron → SQS |
-| Primary DB | DocumentDB (Mongo-compatible) or RDS Postgres w/ JSONB — decide below |
 | Object storage | S3 (demo static sites, site assets, outreach creative) |
-| CDN | CloudFront in front of demo S3 bucket, wildcard subdomain `*.yourbrand.com` |
-| Live customer sites | Vercel (per-customer project or single multi-tenant project w/ dynamic routing) |
+| CDN for demo subdomains | CloudFront in front of S3, wildcard `*.yourbrand.com` |
+| Live customer sites | Multi-tenant Next.js app on Netlify, slug-routed via DB lookup |
 | Email sending | Amazon SES, 3-5 warmed subdomains rotated |
 | SMS | Twilio |
 | Payments | Stripe |
-| Secrets | Env vars via SSM Parameter Store, injected at task start |
+| Secrets | Netlify env vars (web), SSM Parameter Store (workers) |
 | Observability | Sentry (errors, perf, tracing) |
-| CI/CD | GitHub Actions → ECR → ECS deploy |
+| CI/CD | GitHub Actions → Netlify deploy (web) + ECR → ECS deploy (workers) |
 
-**DB choice:** Postgres + JSONB. Gives us document flexibility for the business aggregate while keeping SQL for relational bits (subscriptions, outreach events, audit log). Avoids operating DocumentDB/Mongo separately. One DB for MVP.
+**DB choice:** Netlify DB (Neon Postgres) with JSONB for the document-shaped business aggregate. Reverts the earlier Atlas pick — keeping the DB inside Netlify simplifies env wiring, branching, and credentials. Tradeoff acknowledged: nested-document ergonomics are worse than Mongo, so we pay it in a small data-access layer (`packages/db`) that hides JSONB path expressions behind typed helpers.
+
+**Why not all-Netlify?** `worker-discovery` paginates data sources for hours; `worker-sitegen` pins warm sandboxes per chat session for fast AI rebuilds; both blow the 15-min Background Function cap. They stay on Fargate and talk to Netlify's API and DB over the public endpoints (Neon connection over TLS).
 
 ## Data model (high level)
 
@@ -213,6 +221,7 @@ Public marketing site, deployed to Vercel at the apex domain (`yourbrand.com`). 
 
 ## Key cost levers
 - Data source tiering (don't burn Google Maps $ on low-score leads).
-- Demo-on-S3 until conversion (Vercel only for paying customers).
+- Demo-on-S3 until conversion (Netlify hosts the live multi-tenant app, demos stay static).
 - Prompt caching on Claude calls (templates + business record).
 - LLM usage metered per-business to catch runaway costs.
+- Fargate worker count kept minimal (3-4 services, scale-to-zero where possible).
