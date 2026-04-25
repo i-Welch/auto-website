@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+.next/
+.netlify/
+.turbo/
+docs/
+**/*.min.*
+**/migrations/**
+bun.lock

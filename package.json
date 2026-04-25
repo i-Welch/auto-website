@@ -1,0 +1,23 @@
+{
+  "name": "growonline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "bun run --filter '@growonline/db' db:generate",
+    "db:migrate": "bun run --filter '@growonline/db' db:migrate",
+    "db:studio": "bun run --filter '@growonline/db' db:studio"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}
